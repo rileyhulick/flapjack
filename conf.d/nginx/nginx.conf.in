@@ -1,0 +1,55 @@
+daemon off;
+pid /dev/null;
+error_log $(nginx_dir)/ngnix-error.log;
+events {}
+http {
+  access_log $(nginx_dir)/ngnix-access.log;
+  autoindex on;
+  gzip off;
+  include $(system_nginx_conf_dir)/mime.types;
+  server {
+    listen $(www_port) default_server;
+    listen [::]:$(www_port) default_server;
+
+    root $(www_dir);
+$begin\
+$py(
+_index_suffix = ''
+if not 'aux_nginx_indices' in globals():
+  aux_nginx_indices = []
+if with_php:
+  aux_nginx_indices.append('index.php')
+for i in sorted(aux_nginx_indices):
+  _index_suffix += (' ' + i)
+)
+    index index.html index.htm$(_index_suffix);
+$end\
+
+    try_files \$uri \$uri/ =404;
+$begin\
+$py(
+_server_infix = ''
+try:
+  import re
+  for _directive in nginx_server_aux:
+    if not re.match(r';\s*$', _directive):
+      _directive += ';'
+    _server_infix += _directive
+except NameError:
+  pass
+)
+    $(_server_infix)
+$end\
+$if(with_php)\
+    location ~ \.php\$ {
+      fastcgi_split_path_info ^(.+?\.php)(/.*)\$;
+      try_files \$fastcgi_script_name =404;
+      set \$path_info \$fastcgi_path_info;
+      fastcgi_param PATH_INFO \$path_info;
+      fastcgi_index index.php;
+      include /etc/nginx/fastcgi.conf;
+      fastcgi_pass unix:$(php_dir)/php-fcgi.sock;
+    }
+$endif\
+  }
+}

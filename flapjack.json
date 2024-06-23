@@ -1,0 +1,7 @@
+{
+    "www_dir": "./.srv/www",
+    "www_port": 58080,
+    "mysql_data_dir": "./.srv/data",
+    "mysql_port": 53060,
+    "stack" : [ "nginx", "mysql", "php" ]
+}

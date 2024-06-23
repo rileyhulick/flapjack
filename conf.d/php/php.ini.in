@@ -1,0 +1,21 @@
+[PHP]
+error_log = $(php_dir)/php-error.log
+display_errors = On
+display_startup_errors = On
+log_errors = On
+ignore_repeated_errors = Off
+ignore_repeated_source = Off
+report_memleaks = On
+
+[xDebug]
+zend_extension=xdebug.so
+xdebug.mode=debug
+xdebug.log=$(php_dir)/xdebug.log
+xdebug.log_level=1
+xdebug.start_with_request=yes
+
+$if(with_mysql)\
+[MySQLi]
+mysqli.default_port = $(mysql_port)
+mysqli.default_socket = $(mysql_dir)/mysql/mysql.sock
+$endif
