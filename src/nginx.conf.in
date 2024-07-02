@@ -1,12 +1,15 @@
 daemon off;
 pid /dev/null;
-error_log $(nginx_dir)/ngnix-error.log;
+error_log $(run_dir)/ngnix-error.log;
 events {}
 http {
-  access_log $(nginx_dir)/ngnix-access.log;
+  access_log $(run_dir)/ngnix-access.log;
   autoindex on;
   gzip off;
   include $(system_nginx_conf_dir)/mime.types;
+  client_body_temp_path $(temp_dir)/nginx;
+  client_max_body_size 256M;
+  proxy_read_timeout 24h;
   server {
     listen $(www_port) default_server;
     listen [::]:$(www_port) default_server;
@@ -48,8 +51,9 @@ $if(with_php)\
       fastcgi_param PATH_INFO \$path_info;
       fastcgi_index index.php;
       include /etc/nginx/fastcgi.conf;
-      fastcgi_pass unix:$(php_dir)/php-fcgi.sock;
+      fastcgi_pass unix:$(temp_dir)/php-fcgi.sock;
+      fastcgi_read_timeout 24h;
     }
-$endif\
+$endif
   }
 }

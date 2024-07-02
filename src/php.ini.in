@@ -1,0 +1,66 @@
+[PHP]
+error_reporting = E_ALL
+report_memleaks = On
+
+error_log = /mnt/data/.var/minidragon.art/srv/php-error.log
+log_errors = On
+
+display_errors = "E_ALL & ~E_NOTICE & ~E_STRICT & ~E_DEPRECATED"
+display_startup_errors = On
+ignore_repeated_errors = On
+ignore_repeated_source = On
+
+post_max_size=256M
+upload_max_filesize=256M
+
+# TODO load these selectively based on availability and flapjack config
+
+extension=mysqlnd.so
+extension=pdo.so
+extension=xml.so
+extension=calendar.so
+extension=ctype.so
+extension=curl.so
+extension=dom.so
+extension=exif.so
+extension=ffi.so
+extension=fileinfo.so
+extension=ftp.so
+extension=gd.so
+extension=gettext.so
+extension=gmp.so
+extension=iconv.so
+extension=intl.so
+extension=mbstring.so
+extension=mysqli.so
+extension=pdo_mysql.so
+extension=phar.so
+extension=posix.so
+extension=readline.so
+extension=shmop.so
+extension=simplexml.so
+extension=sockets.so
+extension=sysvmsg.so
+extension=sysvsem.so
+extension=sysvshm.so
+extension=tokenizer.so
+extension=xmlreader.so
+extension=xmlwriter.so
+extension=xsl.so
+
+zend_extension=opcache.so
+opcache.jit=off
+
+zend_extension=xdebug.so
+
+[xDebug]
+xdebug.mode=debug
+xdebug.log=$(run_dir)/xdebug.log
+xdebug.log_level=1
+xdebug.start_with_request=yes
+
+$if(with_mysql)\
+[MySQLi]
+mysqli.default_port = $(data_port)
+mysqli.default_socket = $(temp_dir)/mysql.sock
+$endif

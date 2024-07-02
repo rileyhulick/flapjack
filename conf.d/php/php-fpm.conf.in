@@ -1,9 +1,0 @@
-[global]
-daemonize = no
-pid = /dev/null
-error_log = $(php_dir)/php-error.log
-
-[www]
-listen = $(php_dir)/php-fcgi.sock
-pm = static
-pm.max_children = 1

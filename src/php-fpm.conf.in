@@ -1,0 +1,9 @@
+[global]
+daemonize = no
+pid = /dev/null
+error_log = $(run_dir)/php-error.log
+
+[www]
+listen = $(temp_dir)/php-fcgi.sock
+pm = ondemand
+pm.max_children = 256

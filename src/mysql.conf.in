@@ -1,4 +1,4 @@
 [mysqld]
 default_storage_engine=innodb
-log_error=$(mysql_dir)/mysql.err
+log_error=$(run_dir)/mysql.err
 loose_log_warnings=2
