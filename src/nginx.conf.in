@@ -2,6 +2,7 @@ daemon off;
 pid /dev/null;
 error_log $(run_dir)/ngnix-error.log;
 events {}
+$(nginx_global_aux)
 http {
   access_log $(run_dir)/ngnix-access.log;
   autoindex on;
@@ -10,39 +11,27 @@ http {
   client_body_temp_path $(temp_dir)/nginx;
   client_max_body_size 256M;
   proxy_read_timeout 24h;
+  $(nginx_http_aux)
   server {
     listen $(www_port) default_server;
     listen [::]:$(www_port) default_server;
-
     root $(www_dir);
 $begin\
 $py(
-_index_suffix = ''
-if not 'aux_nginx_indices' in globals():
-  aux_nginx_indices = []
+try:
+  nginx_aux_indices
+except NameError:
+  nginx_aux_indices = []
 if with_php:
-  aux_nginx_indices.append('index.php')
-for i in sorted(aux_nginx_indices):
+  nginx_aux_indices.append('index.php')
+_index_suffix = ''
+for i in sorted(nginx_aux_indices):
   _index_suffix += (' ' + i)
 )
     index index.html index.htm$(_index_suffix);
 $end\
-
     try_files \$uri \$uri/ =404;
-$begin\
-$py(
-_server_infix = ''
-try:
-  import re
-  for _directive in nginx_server_aux:
-    if not re.match(r';\s*$', _directive):
-      _directive += ';'
-    _server_infix += _directive
-except NameError:
-  pass
-)
-    $(_server_infix)
-$end\
+    $(nginx_server_aux)
 $if(with_php)\
     location ~ \.php\$ {
       fastcgi_split_path_info ^(.+?\.php)(/.*)\$;

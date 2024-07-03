@@ -1,5 +1,5 @@
 import asyncio, os, os.path, shutil, sys, tempfile, subprocess
-import re
+import re, json
 import pyexpander.lib as pyexpander
 from collections import OrderedDict
 
@@ -29,6 +29,14 @@ class Core:
         def key(self):
             return self._key
 
+    class NoConfigWarning(Exception):
+        def __init__(self, work_dir: str):
+            self._work_dir = work_dir
+
+        @property
+        def work_dir(self):
+            return self._work_dir
+
     def __init__(
             self
           , args = None
@@ -41,12 +49,47 @@ class Core:
         self._temp_dir = None
         self._work_dir = None
 
-        self._processes = []
+        # self._processes = []
+
+        self._www_port = None
+        self._www_dir  = None
+        self._data_port = None
+        self._data_dir  = None
 
         stack = []
 
+        tolerate_no_read_config = False
+        write_config_file = None
+
         if args:
-            pass
+            self._work_dir = args.work_dir
+            self._run_dir  = args.run_dir
+            self._temp_dir = args.temp_dir
+
+            self._config_file = args.config_file
+
+            if args.stack:
+                stack = args.stack
+
+            if args.write_config:
+                write_config_file = args.write_config
+            elif args.write_config is None:
+                write_config_file = './flapjack.json'
+
+
+            self._www_port  = args.port
+            # self._www_dir   = args.www_dir
+            self._data_port = args.data_port
+            self._data_dir  = args.data_dir
+
+            tolerate_no_read_config = any([
+                    args.force,
+                    write_config_file,
+                    args.stack,
+                    args.port,
+                    # args.data_port,
+                    # args.data_dir,
+                ])
 
         if self._work_dir:
             if not os.path.isdir(self._work_dir):
@@ -54,9 +97,11 @@ class Core:
         else:
             self._work_dir = os.getcwd()
 
-        if not self._config_file:
-
-            for name in ['flapjack.json', 'flapjack.yaml', 'flapjack.yml']:
+        if self._config_file:
+            if not os.path.isfile(self._config_file):
+                raise Core.BadConfigFileError()
+        else:
+            for name in ['flapjack.json']: # 'flapjack.yaml', 'flapjack.yml'
                 maybe_file = os.path.join(self._work_dir, name)
                 if not os.path.isfile(maybe_file):
                     continue
@@ -64,8 +109,32 @@ class Core:
                 self._config_file = maybe_file
                 break
 
-            # if not self._config_file:
-            #     raise Core.BadConfigFileError()
+            if not tolerate_no_read_config and not self._config_file:
+                raise Core.NoConfigWarning(self._work_dir)
+
+        if self._config_file:
+            with open(self._config_file, 'r') as f:
+                self._config = json.load(f, object_hook=OrderedDict)
+
+            if not stack and 'stack' in self._config:
+                stack = self._config['stack']
+                if not isinstance(stack, list):
+                    raise Core.ConfigFileStackTypeError
+
+            # specifying work_dir in the config file may not be well-formed,
+            # possibly warn about that here?
+
+            if not self._www_dir:
+                self._www_dir = self._config.get('www_dir')
+            if not self._www_port:
+                self._www_port = self._config.get('www_port')
+
+            if not self._data_dir:
+                self._data_dir = self._config.get('data_dir')
+            if not self._data_port:
+                self._data_port = self._config.get('data_port')
+
+                # del self._config['stack']
 
         # TODO global configuration?
 
@@ -78,6 +147,9 @@ class Core:
         if not any( n in stack for n in httpd_names ):
             stack.append('nginx')
 
+        # TODO get pickier and don't spin up a database (and possibly app
+        # framework) if we haven't been told to
+
         self._stack = OrderedDict()
 
         self._app_framework = None
@@ -89,7 +161,7 @@ class Core:
                 name = stack_entry
                 pass
             else:
-                raise Core.ConfigFileStackTypeError()
+                raise Core.ConfigFileStackTypeError
 
             with_ = self._config.get('with_' + name, True)
             if not with_:
@@ -191,31 +263,40 @@ class Core:
 
         if self._httpd:
             # TODO choose random port
-            self._www_port = self._config.get('www_port')
+            # self._www_port = self._config.get('www_port')
             if not self._www_port:
-                self._www_port = self._config['www_port'] = 58080
+                self._www_port = 58080
+            self._config['www_port'] = self._www_port
 
-            self._www_dir = self._config.get('www_dir', '.')
-            if not os.path.isabs(self._www_dir):
-                self._config['www_dir'] = self._www_dir = os.path.normpath(os.path.join(self._work_dir, self._www_dir))
+            # self._www_dir = self._config.get('www_dir', '.')
+            if not self._www_dir:
+                self._www_dir = self._work_dir
+            elif not os.path.isabs(self._www_dir):
+                self._www_dir = os.path.normpath(os.path.join(self._work_dir, self._www_dir))
+            self._config['www_dir'] = self._www_dir
 
         if self._database:
             # TODO support persistent local socket as an alternative to TCP port
 
             # TODO random port
-            self._data_port = self._config.get('data_port')
+            # self._data_port = self._config.get('data_port')
             if not self._data_port:
-                self._data_port = self._config['data_port'] = 53060
+                self._data_port = 53060
+
+            self._config['data_port'] = self._data_port
 
             # TODO data directory should include at least the database component
             # name as  known to flapjack (i.e., 'mysql'), and possibly additional
             # case-specific identifiers (i.e., 'mysql-innodb'). this could help
             # prevent confusion if multiple database directories are used.
 
-            self._data_dir = self._config.get('data_dir')
-            if not self._data_dir:
-                # relative path for now, will be made absolute in _setup_writable_dirs
-                self._config['data_dir'] = self._data_dir = './data'
+            # self._data_dir = self._config.get('data_dir')
+            # if not self._data_dir:
+            #     # relative path for now, will be made absolute in _setup_writable_dirs
+            #     self._config['data_dir'] = self._data_dir = './data'
+
+        if write_config_file:
+            print('[flapjack] writing config file from command line not yet supported', file=sys.stderr)
 
     def _setup_writable_dirs(self):
         try:
@@ -246,7 +327,7 @@ class Core:
         if self._temp_dir:
             if not os.path.isabs(self._temp_dir):
                 assert not all_in_temp # TODO
-                self._temp_dir = os.path.normpath(os.path.join(self._run_dir, self._temp_dir))
+                self._temp_dir = os.path.normpath(os.path.join(self._work_dir, self._temp_dir))
 
             try:
                 os.makedirs(self._temp_dir)
@@ -273,9 +354,13 @@ class Core:
         self._config['temp_dir'] = self._temp_dir
 
         if self._database:
-            assert self._data_dir
-            if not os.path.isabs(self._data_dir):
-                self._config['data_dir'] = self._data_dir = os.path.normpath(os.path.join(self._run_dir, self._data_dir))
+            # self._data_dir = self._config.get('data_dir')
+            if not self._data_dir:
+                self._data_dir = os.path.normpath(os.path.join(self._run_dir, './data'))
+            elif not os.path.isabs(self._data_dir):
+                self._data_dir = os.path.normpath(os.path.join(self._work_dir, self._data_dir))
+
+            self._config['data_dir'] = self._data_dir
 
             try:
                 os.makedirs(self._data_dir)
@@ -353,6 +438,11 @@ class Core:
             # generate all config filenames before generating any config files
             # so they can reference each other freely
             for component in self._stack.values():
+                try:
+                    component.validate_config()
+                except AttributeError:
+                    pass
+
                 config_files = []
                 try:
                     config_files = component.config_files.items()

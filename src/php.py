@@ -1,4 +1,4 @@
-import os, os.path, glob
+import os, os.path, glob, re
 from .core import Core
 
 # TODO currently PHP is supported via fpm/fcgi but we could reasonably support
@@ -42,6 +42,58 @@ class Php:
         return {
                 'PHP_INI_SCAN_DIR': 'Off'
             }
+
+    def validate_config(self):
+        # probably a better way to do this would be to locate the native PHP
+        # config directory and parse its contents
+
+        # CAUTION the order of extensions makes a difference.
+
+        possible_extensions = [
+                'calendar.so',
+                'ctype.so',
+                'curl.so',
+                'dom.so',
+                'exif.so',
+                'ffi.so',
+                'fileinfo.so',
+                'ftp.so',
+                'gd.so',
+                'gettext.so',
+                'gmp.so',
+                'iconv.so',
+                'intl.so',
+                'mbstring.so',
+                'mysqlnd.so',
+                'mysqli.so',
+                'pdo.so',
+                'pdo_mysql.so',
+                'phar.so',
+                'posix.so',
+                'readline.so',
+                'shmop.so',
+                'simplexml.so',
+                'sockets.so',
+                'sysvmsg.so',
+                'sysvsem.so',
+                'sysvshm.so',
+                'tokenizer.so',
+                'xml.so',
+                'xmlreader.so',
+                'xmlwriter.so',
+                'xsl.so',
+            ]
+
+        extensions = []
+        lib_path = os.path.join(os.path.dirname(self.exec_name), '../lib/php')
+        if os.path.isdir(lib_path):
+            found_extensions = set([ os.path.basename(file_) for file_ in glob.iglob(os.path.join(lib_path, '**/*.so'), recursive=True) ])
+            assert 'mysqlnd.so' in found_extensions # TODO
+
+            extensions = [ ext for ext in possible_extensions if ext in found_extensions ]
+
+        self._core.config['php_extensions'] = extensions
+
 
     # @property
     # def system_config_dirs(self):
