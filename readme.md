@@ -42,7 +42,7 @@ Flapjack is still a work-in-progress so there are some caveats:
  - Only Nginx / MySQL / PHP-FPM is currently supported. More stacks and
    configurations will be supported in the future!
  - Startup errors and crashes are not robustly detected (yet). Keep an eye on
-   your .flatpak/*.log files if you're having trouble.
+   your .flapjack/*.log files if you're having trouble.
  - Flapjack will initialize a MySQL data directory, but will not (yet) populate
    it with a project-specific database or credentials. You will have to set
    this part up yourself e.g., with something like:
