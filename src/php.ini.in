@@ -13,14 +13,14 @@ ignore_repeated_source = On
 post_max_size=256M
 upload_max_filesize=256M
 
-$for( ext in php_extensions )\
-extension=$(ext)
+$for( mod in php_mods_enabled.values() )\
+$(mod)
 $endfor\
 
-zend_extension=opcache.so
-opcache.jit=off
+;zend_extension=opcache.so
+;opcache.jit=off
 
-zend_extension=xdebug.so
+;zend_extension=xdebug.so
 
 [xDebug]
 xdebug.mode=debug

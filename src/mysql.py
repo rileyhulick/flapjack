@@ -13,17 +13,12 @@ class Mysql:
         return { 'mysql_conf': 'mysql.conf.in' }
 
     @property
-    def exec_name(self):
-        return 'mysqld'
-
-    @property
-    def exec_args(self):
-        return [
-                '--defaults-file=' + self._core.config['mysql_conf'],
-                '--datadir', self._core.config['data_dir'],
-                '--socket', os.path.join(self._core.run_dir, 'mysql.sock'),
-                '-P', str(self._core.config['data_port']),
-            ]
+    def daemon_command(self):
+        return \
+        'mysqld', [ '--defaults-file=' + self._core.config['mysql_conf'],
+                    '--datadir', self._core.config['data_dir'],
+                    '--socket', os.path.join(self._core.run_dir, 'mysql.sock'),
+                    '-P', str(self._core.config['data_port']), ]
 
     @property
     def install_db_exec_args(self):

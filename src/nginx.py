@@ -1,27 +1,21 @@
-import re
+import re, os.path
 from .core import Core
+from .utils import sbin_which, get_prefixed_dir
 
 class Nginx:
     def __init__(self, core: Core):
         self._core = core
 
-    @property
-    def config_files(self):
-        return { 'nginx_conf': 'nginx.conf.in' }
+        self._exec_name = sbin_which('nginx')
+        assert self._exec_name # TODO
 
-    @property
-    def exec_name(self):
-        return 'nginx'
+        self._system_config_dir = get_prefixed_dir(self._exec_name, './etc/nginx')
+        assert self._system_config_dir # TODO
 
-    @property
-    def exec_args(self):
-        return [ '-c', self._core.config['nginx_conf'] ]
+        self._update_config()
 
-    @property
-    def system_config_dirs(self):
-        return { 'system_nginx_conf_dir': './etc/nginx' }
-
-    def validate_config(self):
+    def _update_config(self):
+        self._core.config['system_nginx_conf_dir'] = self._system_config_dir
 
         out_indices = []
         def _update_aux_indices(in_value):
@@ -100,4 +94,16 @@ class Nginx:
         self._core.config.setdefault('nginx_server_aux', '')
         self._core.config.setdefault('nginx_http_aux', '')
         self._core.config.setdefault('nginx_global_aux', '')
+
+    @property
+    def config_files(self):
+        return { 'nginx_conf': 'nginx.conf.in' }
+
+    @property
+    def daemon_command(self):
+        return self._exec_name, [ '-c', self._core.config['nginx_conf'] ]
+
+    # @property
+    # def system_config_dirs(self):
+    #     return { 'system_nginx_conf_dir': './etc/nginx' }
 

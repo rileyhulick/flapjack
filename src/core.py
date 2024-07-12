@@ -3,6 +3,9 @@ import re, json
 import pyexpander.lib as pyexpander
 from collections import OrderedDict
 
+from .session import Session
+from .utils import sbin_which
+
 in_dir = os.path.dirname(os.path.realpath(__file__))
 
 app_framework_names = dict()
@@ -49,7 +52,7 @@ class Core:
         self._temp_dir = None
         self._work_dir = None
 
-        # self._processes = []
+        self._processes = []
 
         self._www_port = None
         self._www_dir  = None
@@ -59,7 +62,10 @@ class Core:
         stack = []
 
         tolerate_no_read_config = False
-        write_config_file = None
+        # write_config_file = None
+
+        self._daemonize = False
+        self._is_stop_daemon = False
 
         if args:
             self._work_dir = args.work_dir
@@ -71,10 +77,10 @@ class Core:
             if args.stack:
                 stack = args.stack
 
-            if args.write_config:
-                write_config_file = args.write_config
-            elif args.write_config is None:
-                write_config_file = './flapjack.json'
+            # if args.write_config:
+            #     write_config_file = args.write_config
+            # elif args.write_config is None:
+            #     write_config_file = './flapjack.json'
 
 
             self._www_port  = args.port
@@ -84,12 +90,16 @@ class Core:
 
             tolerate_no_read_config = any([
                     args.force,
-                    write_config_file,
+                    # write_config_file,
                     args.stack,
                     args.port,
                     # args.data_port,
                     # args.data_dir,
                 ])
+
+            self._daemonize = args.daemonize
+            self._is_stop_daemon = args.stop_daemon
+
 
         if self._work_dir:
             if not os.path.isdir(self._work_dir):
@@ -192,68 +202,6 @@ class Core:
             self._stack[name] = component
             self._config['with_' + name] = True
 
-            exec_path_key = name + '_exec'
-            exec_path_prefix = None
-
-            exec_path = self._config.get(exec_path_key)
-            if exec_path:
-                assert os.path.isabs(exec_path) # TODO
-            else:
-                if os.path.isabs(component.exec_name):
-                    exec_path = component.exec_name
-                else:
-                    exec_search_paths = [ None, '/sbin', '/usr/sbin' ] # libexec?
-                    # try:
-                    #     exec_search_paths = component.exec_paths + exec_search_paths
-                    # except AttributeError:
-                    #     pass
-
-                    for search_path in exec_search_paths:
-                        exec_path = shutil.which(component.exec_name, path=search_path)
-                        if exec_path:
-                            break
-
-                    if not exec_path:
-                        raise Core.ExecPathNotFound(component.exec_name, key=exec_path_key)
-
-                    exec_path_prefix = os.path.normpath(os.path.join(os.path.dirname(exec_path), '..'))
-
-                self._config[exec_path_key] = exec_path
-
-            if not os.path.isfile(exec_path):
-                if not exec_path:
-                    raise Core.ExecPathNotFound(component.exec_name, key=exec_path_key)
-
-            if not exec_path_prefix:
-                exec_path_prefix = '/'
-
-            system_config_dirs = []
-            try:
-                system_config_dirs = component.system_config_dirs.items()
-            except AttributeError:
-                pass
-
-            for system_config_dir_key, system_config_dir in system_config_dirs:
-                if system_config_dir_key in self._config:
-                    assert os.path.isabs(self._config[system_config_dir_key]) # TODO
-                else:
-                    if os.path.isabs(system_config_dir):
-                        assert os.path.isdir(system_config_dir) # TODO
-                        self._config[system_config_dir_key] = system_config_dir
-
-                    else:
-                        found_dir = False
-                        for prefix in [ exec_path_prefix, '/' ]:
-                            maybe_dir = os.path.normpath(os.path.join(prefix, system_config_dir))
-                            if not os.path.isdir(maybe_dir):
-                                continue
-
-                            self._config[system_config_dir_key] = maybe_dir
-                            found_dir = True
-                            break
-
-                        assert found_dir # TODO
-
         for n in app_framework_names:
             self._config.setdefault('with_' + n, False)
         for n in database_names:
@@ -295,19 +243,12 @@ class Core:
             #     # relative path for now, will be made absolute in _setup_writable_dirs
             #     self._config['data_dir'] = self._data_dir = './data'
 
-        if write_config_file:
-            print('[flapjack] writing config file from command line not yet supported', file=sys.stderr)
-
-    def _setup_writable_dirs(self):
-        try:
-            if self._writable_dirs_ready:
-                return
-        except AttributeError:
-            pass
+        # if write_config_file:
+        #     print('[flapjack] writing config file from command line not yet supported', file=sys.stderr)
 
         assert os.path.isabs(self._work_dir)
 
-        all_in_temp = False
+        self._all_in_temp = False
 
         if self._run_dir:
             if not os.path.isabs(self._run_dir):
@@ -316,39 +257,50 @@ class Core:
             if os.access(self._work_dir, os.W_OK):
                 self._run_dir = os.path.normpath(os.path.join(self._work_dir, '.flapjack'))
             else:
-                all_in_temp = True
+                self._all_in_temp = True
 
-        if self._run_dir:
-            try:
-                os.makedirs(self._run_dir)
-            except FileExistsError:
-                pass
+        if self._temp_dir and not os.path.isabs(self._temp_dir):
+            assert not self._all_in_temp # TODO
+            self._temp_dir = os.path.normpath(os.path.join(self._work_dir, self._temp_dir))
+
+        self._lockfile = None
+        if not self._all_in_temp:
+            self._lockfile = os.path.join(self._run_dir, 'flapjack.lock')
+        self._session = Session(self._lockfile)
+
+
+
+    def _setup_writable_dirs(self):
+        try:
+            if self._writable_dirs_ready:
+                return
+        except AttributeError:
+            pass
+
+        try:
+            os.makedirs(self._run_dir)
+        except FileExistsError:
+            pass
 
         if self._temp_dir:
-            if not os.path.isabs(self._temp_dir):
-                assert not all_in_temp # TODO
-                self._temp_dir = os.path.normpath(os.path.join(self._work_dir, self._temp_dir))
-
             try:
                 os.makedirs(self._temp_dir)
             except FileExistsError:
                 pass
         else:
             self._temp_dir_ctx = tempfile.TemporaryDirectory(
-                    prefix = ('tmp_' if not all_in_temp else 'flapjack_'),
-                    dir = (self._run_dir if not all_in_temp else None)
+                    prefix = ('tmp_' if not self._all_in_temp else 'flapjack_'),
+                    dir = (self._run_dir if not self._all_in_temp else None)
                 )
             self._temp_dir = self._temp_dir_ctx.name
 
-            if all_in_temp:
+            if self._all_in_temp:
                 self._run_dir = self._temp_dir
 
-        assert os.path.isdir(self._run_dir) \
-            and os.path.isabs(self._run_dir) \
-            and os.access(self._run_dir, os.W_OK) \
-            and os.path.isdir(self._temp_dir) \
-            and os.path.isabs(self._temp_dir) \
-            and os.access(self._temp_dir, os.W_OK)
+        assert all([
+            os.path.isdir(self._run_dir),  os.path.isabs(self._run_dir),  os.access(self._run_dir, os.W_OK),
+            os.path.isdir(self._temp_dir), os.path.isabs(self._temp_dir), os.access(self._temp_dir, os.W_OK),
+            ])
 
         self._config['run_dir'] = self._run_dir
         self._config['temp_dir'] = self._temp_dir
@@ -404,116 +356,158 @@ class Core:
         self._setup_writable_dirs()
         return self._temp_dir
 
-    def run(self) -> None:
+    def _lock_new_session(self):
+        attempts = 2
+        while attempts > 0:
+            attempts -= 1
+            try:
+                self._session.lock_new()
+                break
+            except FileNotFoundError:
+                if not self._all_in_temp \
+                    and os.path.samefile(os.path.dirname(self._session.lockfile_name), self._run_dir):
+                    os.path.makedirs(self._run_dir)
+                    continue
+                raise
+
+    def _stop_daemon(self):
+        import signal
+
+        self._session.lock_existing()
+        os.kill(self._session.pid, signal.SIGINT)
+
+    def _run_stack(self):
         if not self._stack:
             print('[flapjack] empty stack (quitting)', file=sys.stderr)
             return
 
-        processes = []
+        self._lock_new_session()
 
-        try:
-            self._setup_writable_dirs()
+        if self._daemonize:
+            if os.fork() == 0:
+                print(f"pid: {os.getpid()}")
+            else:
+                self._session.soft_unlock()
+                return
 
-            if self._database:
-                new_data_dir = False
-                try:
-                    new_data_dir = self._new_data_dir
-                except AttributeError:
-                    pass
+        self._session.write()
+        self._setup_writable_dirs()
 
-                install_db_exec_args = None
-                try:
-                    install_db_exec_args = self._database.install_db_exec_args
-                except AttributeError:
-                    pass
+        # this could probably use some polish
+        if self._database:
+            new_data_dir = False
+            try:
+                new_data_dir = self._new_data_dir
+            except AttributeError:
+                pass
 
-                if new_data_dir and install_db_exec_args:
-                    # TODO /sbin support? custom path?
+            install_db_exec_args = None
+            try:
+                install_db_exec_args = self._database.install_db_exec_args
+            except AttributeError:
+                pass
 
-                    p = subprocess.run(install_db_exec_args)
-                    assert p.returncode == 0
+            if new_data_dir and install_db_exec_args:
+                # TODO /sbin support? custom path?
 
-            subprocess_config_files = []
+                p = subprocess.run(install_db_exec_args)
+                assert p.returncode == 0
 
-            # generate all config filenames before generating any config files
-            # so they can reference each other freely
-            for component in self._stack.values():
-                try:
-                    component.validate_config()
-                except AttributeError:
-                    pass
+        subprocess_config_files = []
 
-                config_files = []
-                try:
-                    config_files = component.config_files.items()
-                except AttributeError:
-                    pass
+        # generate all config filenames before generating any config files
+        # so they can reference each other freely
+        for component in self._stack.values():
+            try:
+                component.validate_config()
+            except AttributeError:
+                pass
 
-                for key, in_file in config_files:
-                    in_path = os.path.join(in_dir, in_file)
+            config_files = []
+            try:
+                config_files = component.config_files.items()
+            except AttributeError:
+                pass
 
-                    out_path = self._config.get(key)
-                    if not out_path:
-                        out_file = re.match(r'(.*)(?:\.in)|$', in_file).group(1)
-                        out_path = self._config[key] = os.path.normpath(os.path.join(self._temp_dir, out_file))
+            for key, in_file in config_files:
+                in_path = os.path.join(in_dir, in_file)
 
-                    subprocess_config_files.append((in_path, out_path,))
+                out_path = self._config.get(key)
+                if not out_path:
+                    out_file = re.match(r'(.*)(?:\.in)|$', in_file).group(1)
+                    out_path = self._config[key] = os.path.normpath(os.path.join(self._temp_dir, out_file))
 
-            # now generate the config files
-            for in_path, out_path in subprocess_config_files:
-                with open(in_path, 'r') as if_:
-                    output, inner_globals, deps \
-                        = pyexpander.expandToStr(
-                            if_.read()
-                          , filename=in_path
-                          , external_definitions=self._config )
-                with open(out_path, 'w') as of:
-                    of.write(output)
-                del output
+                subprocess_config_files.append((in_path, out_path,))
 
+        # now generate the config files
+        for in_path, out_path in subprocess_config_files:
+            with open(in_path, 'r') as if_:
+                output, inner_globals, deps \
+                    = pyexpander.expandToStr(
+                        if_.read()
+                        , filename=in_path
+                        , external_definitions=self._config )
+            with open(out_path, 'w') as of:
+                of.write(output)
+            del output
+
+        async def _async_main():
             print('[flapjack] starting subprocesses...')
 
-            async def _run_async():
-                nonlocal processes
+            for key, component in self._stack.items():
+                exec_name, args = component.daemon_command
+                exec_key = key + '_exec'
+                if exec_key in self._config:
+                    exec_name = self._config[exec_key]
+                    assert os.path.isabs(exec_name)
+                else:
+                    if not os.path.isabs(exec_name):
+                        exec_name = sbin_which(exec_name)
+                    assert exec_name
+                    self._config[exec_key] = exec_name
 
-                for key, component in self._stack.items():
-                    exec_path = self._config[key + '_exec']
-
-                    env = None
-                    try:
-                        component.exec_env
-                        env = os.environ.copy()
-                        env.update(component.exec_env.items())
-                    except AttributeError:
-                        pass
-
-                    print(f"[flapjack] starting {key} ({list((exec_path,)) + component.exec_args})")
-                    processes.append( await asyncio.create_subprocess_exec(exec_path, *component.exec_args, env=env) )
-
-                if self._httpd:
-                    httpd_name = ''
-                    for n, c in self._stack.items():
-                        if c == self._httpd:
-                            httpd_name = n
-                            break
-
-                    print(f"[flapjack] {httpd_name} listening on http://localhost:{self._www_port}")
-
-                await asyncio.gather(*[ process.wait() for process in processes ])
-                # TODO detect unexpected signals and non-zero return codes
-
-            asyncio.run( _run_async() )
-
-        except KeyboardInterrupt:
-            print(flush=True)
-            print('[flapjack] terminating subprocesses')
-            for proc in processes:
+                env = None
                 try:
-                    proc.terminate()
-                except ProcessLookupError: # HACK
-                    # if the process has has closed of its own accord
-                    # (i.e., due to an error) then we'll get this exception
+                    component.exec_env
+                    env = os.environ.copy()
+                    env.update(component.exec_env.items())
+                except AttributeError:
                     pass
 
-        finally:
-            self._cleanup_writable_dirs()
+                print(f"[flapjack] starting {key}: {exec_name, args}")
+                process = await asyncio.create_subprocess_exec(exec_name, *args, env=env)
+
+                self._processes.append(process)
+
+            if self._httpd:
+                httpd_name = ''
+                for n, c in self._stack.items():
+                    if c == self._httpd:
+                        httpd_name = n
+                        break
+
+                print(f"[flapjack] {httpd_name} listening on http://localhost:{self._www_port}")
+
+            try:
+                await asyncio.gather(*[ process.wait() for process in self._processes ])
+            finally:
+                self._cleanup_writable_dirs()
+
+        asyncio.run(_async_main())
+
+    def run(self) -> None:
+        with self._session:
+            if self._is_stop_daemon:
+                self._stop_daemon()
+                return
+
+            self._run_stack()
+
+    def stop(self):
+        if self._processes:
+            print('[flapjack] terminating subprocesses')
+            for process in self._processes:
+                try:
+                    process.terminate()
+                except ProcessLookupError:
+                    pass
